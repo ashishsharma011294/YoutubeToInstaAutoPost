@@ -16,13 +16,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Include Deno JS runtime for yt-dlp YouTube signature cipher decryption -->
-    <Content Include="deno.exe">
+    <!-- Include executables if they exist -->
+    <Content Include="deno.exe" Condition="Exists('deno.exe')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
-    <!-- Include yt-dlp executable -->
-    <Content Include="yt-dlp.exe">
+    <Content Include="yt-dlp.exe" Condition="Exists('yt-dlp.exe')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="ffmpeg.exe" Condition="Exists('ffmpeg.exe')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

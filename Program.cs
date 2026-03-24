@@ -30,6 +30,7 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<NgrokService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<NgrokService>());
+builder.Services.AddHostedService<VideoCleanupService>();
 builder.Services.AddScoped<YouTubeDownloadService>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddScoped<YouTubeTrendingService>();

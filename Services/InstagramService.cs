@@ -44,12 +44,12 @@ public class InstagramService
             var createMediaPayload = new
             {
                 media_type = "REELS",
-                video_url = videoUrl, // Using the forced-raw link
+                video_url = videoUrl,
                 caption = caption,
                 access_token = accessToken
             };
 
-            _logger.LogInformation("Creating media container with Dropbox link...");
+            _logger.LogInformation("Creating media container for video: {VideoUrl}", videoUrl);
             var createResponse = await _httpClient.PostAsJsonAsync(createMediaUrl, createMediaPayload);
             if (!createResponse.IsSuccessStatusCode)
             {

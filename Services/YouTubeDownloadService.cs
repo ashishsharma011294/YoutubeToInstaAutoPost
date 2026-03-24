@@ -1,194 +1,243 @@
-using Dropbox.Api;
-using Dropbox.Api.Files;
-using Dropbox.Api.Sharing;
 using YoutubeDLSharp;
 using YoutubeDLSharp.Options;
+
+namespace InstaAutoPost.Services;
 
 public class YouTubeDownloadService
 {
     private readonly ILogger<YouTubeDownloadService> _logger;
     private readonly string _tempFolder;
-    private readonly string _dropboxAccessToken = "sl.u.AGQuygP2hElsiq_w-JcmVmTk_tuvmwqB1YERhcvWsCJM4HEc_rFxjf7zAEpEZzy_G-hNRQCLVsvPLt_v4czcRm2cyXGZY9evfB1Frkh9qFDgiS4VuDsxOH5EQ18NWpPvdqDNLhtr8b-NTFZbtztz5i3rpuXgGfKBm83Vsn8qifqwczKgw9-0QhhkCYPGzdSnvl5p3V1ftc87SeHJ6KhlLcmEsT0LC1rRVygSAzoBDLM-QJATHDY_z1qjrwqpwfZCsNuYtDqFE0cwYmivD0sob50Of0pkgkt9fNJvu6RAmF07WHsRBfzQiy8r_sYPvFCAezoTb18Xgx4kpKc8NqXx0wHoH2FF3uHPuqiOV7LQJUiSrCn0QIJmwdgSHw63oeiB5hfOsy1tnXLm_EiDRSuBOJRxlhD6HQpUpntbdr45oH6uwR6CXHOo5nA0t15tCmkY8Y-3E8xat4Jjri3QAHxHv6YnBns0F3_Sp0DwaQp2PBlhZ4iGqaSyTS3ihLL5CEnQAphnxvpJMbdZqwi9DtUN4aMCmaiYMKZnuXjpk3RtD61tzrRjjFK3GwO8puFKdh1BHE90aCntE04Tm3O7te63PiheEuH-J7pNS7kpUnkehRAXT6JM-1Pokor8PtfbAw67tfQ2B2dg90m2P1EqN4a5DSwLZi3qw3yk3WfASSsX21lUamRWm8axwyMKF02PjxepQZMQtRTn41CV5x1nbon4rpPuBSuZuZ8ZA7gtpu8NfapTJ0UWyWWea1GbFxqVzlRZ6pCbKuFKFLk4wvinZ6dXCbZnxRD7vtmLhjR4NzdwDNvKYGnMK0nZ4y0nxVre8_x-4wL5EW2A_aU4y__sVU0KaCB_xyC2JtBx9OeKAdNjCx3r-pIVDhPVkBxGht5VsNUdlLN-k1iPCA1rnWt-hgV2farwBJOFcYDP7Cm6VXAgmauDI_7BY0YTfS6-VmiET-VTMpCAyPWvROBWAyMustgtHLnh9jS91VzLAAn1dzfWAz28rmqVQan7QZCS2kkWao1JdtP5gJ6EIGzyMe-gwZ_DH6R0HkgnzF6HuVbg789-HGO1FCu9ARunHXalshlFMoH8cAjwipb2QqzfUXxau5fzgM5xTdc-XmVbhXgjyL2kKFxfCQUzRnW1Hhol-mXeHA-Fb9-7b9QK0Gkd-EFJyOSuPWltOn2X0Qy6L6GGsnltF6TuL-xsXnlYAcoygnEgesMn2p72Zh2N3OXuWHOJDjKG-VOT11P2vAOBP_eRfDFj2BnDJU7HWmfd6uP-o5Lj65INmKBKXdV82RD0QJwxscC0TvnCNrw6la6edJlSa565_fC8dA";
-    private readonly string _dropboxFolderPath = "/insta"; // Dropbox path starts with /
+    private readonly NgrokService _ngrokService;
+    private readonly IConfiguration _configuration;
 
-    public YouTubeDownloadService(ILogger<YouTubeDownloadService> logger, IWebHostEnvironment env)
+    public YouTubeDownloadService(ILogger<YouTubeDownloadService> logger, IWebHostEnvironment env, NgrokService ngrokService, IConfiguration configuration)
     {
         _logger = logger;
+        _ngrokService = ngrokService;
+        _configuration = configuration;
+        
         _tempFolder = Path.Combine(env.WebRootPath ?? "wwwroot", "temp");
         if (!Directory.Exists(_tempFolder)) Directory.CreateDirectory(_tempFolder);
     }
 
-    public async Task<string> DownloadAndUploadToDropboxAsync(string youtubeUrl)
+    public async Task<string> DownloadAndProcessForInstagramAsync(string youtubeUrl)
     {
         string localPath = "";
         try
         {
-            // --- STEP 1: Download locally first ---
+            // Generate unique filename
+            var videoId = ExtractVideoId(youtubeUrl);
+            var outputFileName = $"{videoId}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
+            var outputPath = Path.Combine(_tempFolder, outputFileName);
+            
+            _logger.LogInformation("Downloading and processing video {VideoId} for Instagram...", videoId);
+            
+            // --- STEP 1: Download with Instagram-optimized settings ---
             var ytdl = new YoutubeDL
             {
-                OutputFileTemplate = Path.Combine(_tempFolder, "%(id)s.%(ext)s"),
+                OutputFileTemplate = outputPath,
                 YoutubeDLPath = "yt-dlp.exe",
                 FFmpegPath = "ffmpeg.exe"
             };
 
-            // Get Deno path for yt-dlp JavaScript runtime (embedded portable JS engine)
-            string denoPath = GetDenoPath();
-                            
             var options = new OptionSet
-                {
-                    Format = "bestvideo+bestaudio/best",
-                    MergeOutputFormat = DownloadMergeFormat.Mp4,
-                    NoPlaylist = true,
-                    JsRuntimes = "node"
-                };
+            {
+                Format = "best[height<=1920]", // Max Instagram resolution
+                MergeOutputFormat = DownloadMergeFormat.Mp4,
+                NoPlaylist = true
+            };
 
-            // 🔥 FORCE INSTAGRAM FORMAT
-            options.AddCustomOption("--recode-video", "mp4");
+            // Instagram-compatible video processing
+            options.AddCustomOption("--postprocessor-args", 
+                "ffmpeg:" +
+                "-vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,fps=30' " +
+                "-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p " +
+                "-c:a aac -b:a 128k -ar 44100 " +
+                "-movflags +faststart"); // Optimize for streaming
 
-            options.AddCustomOption("--postprocessor-args",
-            "ffmpeg:-vf scale=1080:1920:force_original_aspect_ratio=decrease," +
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30 " +
-            "-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p " +
-            "-c:a aac -b:a 128k");
-            // Add Deno runtime with full path - required for YouTube signature cipher decryption
+            // Add Deno/Node.js runtime if available
+            var denoPath = GetJSRuntimePath();
             if (!string.IsNullOrEmpty(denoPath))
             {
-                options.AddCustomOption("--js-runtimes", $"deno:{denoPath}");
-                _logger.LogInformation("Using Deno JS runtime at: {DenoPath}", denoPath);
+                options.AddCustomOption("--js-runtimes", denoPath);
             }
-            else
-            {
-                // Fallback to auto-detection (may not work if not in PATH)
-                options.AddCustomOption("--js-runtimes", "deno");
-                _logger.LogWarning("Deno path not found, attempting auto-detection");
-            }
-
-
-
 
             var result = await ytdl.RunVideoDownload(youtubeUrl, overrideOptions: options);
             if (!result.Success)
             {
-                var errorOutput = result.ErrorOutput?.ToString() ?? "No error output";
-                _logger.LogError("yt-dlp download failed for URL: {Url}. Error: {Error}", youtubeUrl, errorOutput);
-                throw new Exception($"YouTube download failed: {errorOutput}");
+                var errorOutput = result.ErrorOutput?.ToString() ?? "Unknown error";
+                _logger.LogError("Video download failed: {Error}", errorOutput);
+                throw new InvalidOperationException($"Failed to download video: {errorOutput}");
             }
 
-             string directUrl="";
-            try
+            // Find the downloaded file
+            if (!File.Exists(outputPath))
             {
-            // Find the file
-            localPath = Directory.GetFiles(_tempFolder, "*.mp4")
-                        .OrderByDescending(f => new FileInfo(f).CreationTime).First();
-            string fileName = Path.GetFileName(localPath);
-
-    // --- STEP 2: Upload to Dropbox ---
-    using var dbx = new DropboxClient(_dropboxAccessToken);
-    _logger.LogInformation("Uploading {FileName} to Dropbox...", fileName);
-   
-    using (var stream = new FileStream(localPath, FileMode.Open))
-    {
-        var uploadPath = $"{_dropboxFolderPath}/{fileName}";
-        await dbx.Files.UploadAsync(uploadPath, WriteMode.Overwrite.Instance, body: stream);
-           // --- STEP 3: Create Shared Link ---
-            _logger.LogInformation("Generating shared link...");
-                    SharedLinkMetadata sharedLink;
-                    try
-                    {
-                        sharedLink = await dbx.Sharing.CreateSharedLinkWithSettingsAsync(uploadPath);
-                    }
-                    catch (ApiException<CreateSharedLinkWithSettingsError>)
-                    {
-                        var links = await dbx.Sharing.ListSharedLinksAsync(uploadPath);
-                        sharedLink = links.Links.First();
-                    }
-                      directUrl = sharedLink.Url.Replace("dl=0", "dl=1");
+                // Fallback: find the latest MP4 file
+                var files = Directory.GetFiles(_tempFolder, "*.mp4")
+                    .OrderByDescending(f => new FileInfo(f).CreationTime)
+                    .ToList();
+                
+                if (files.Any())
+                {
+                    outputPath = files.First();
+                }
+                else
+                {
+                    throw new InvalidOperationException("No video file was created");
                 }
             }
-            catch (System.Exception ex)
+
+            localPath = outputPath;
+            var fileName = Path.GetFileName(outputPath);
+            
+            // --- STEP 2: Generate public URL using Ngrok ---
+            var ngrokBaseUrl = await _ngrokService.GetNgrokBaseUrlAsync();
+            if (string.IsNullOrEmpty(ngrokBaseUrl))
             {
-                _logger.LogError(ex, "Error uploading to Dropbox");
-                throw;
+                throw new InvalidOperationException("Ngrok URL not available. Make sure Ngrok is running.");
+            }
+
+            var publicVideoUrl = $"{ngrokBaseUrl}/temp/{fileName}";
+            
+            _logger.LogInformation("Video processed successfully: {FileName}", fileName);
+            _logger.LogInformation("Public video URL: {Url}", publicVideoUrl);
+            
+            return publicVideoUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing video for Instagram");
+            
+            // Clean up partial file if it exists
+            if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
+            {
+                try { File.Delete(localPath); } catch { }
             }
             
-
-            
-            _logger.LogInformation("Success! Direct URL: {Url}", directUrl);
-            return directUrl;
-        }
-        finally
-        {
-            // Cleanup local temp file
-            if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
-                File.Delete(localPath);
+            throw;
         }
     }
 
-    /// <summary>
-    /// Gets the full path to Deno executable (embedded portable JS runtime)
-    /// </summary>
-    private string GetDenoPath()
+    private string ExtractVideoId(string youtubeUrl)
     {
         try
         {
-            // Check for Deno in project directory (embedded portable version)
-            var projectDenoPath = Path.Combine(AppContext.BaseDirectory, "deno.exe");
-            if (File.Exists(projectDenoPath))
+            var uri = new Uri(youtubeUrl);
+            
+            // Handle different YouTube URL formats
+            if (uri.Host.Contains("youtu.be"))
             {
-                _logger.LogInformation("Found embedded Deno at: {Path}", projectDenoPath);
-                return projectDenoPath;
+                // Short URL format: https://youtu.be/VIDEO_ID
+                return uri.Segments.LastOrDefault()?.TrimEnd('/') ?? "unknown";
             }
-
-            // Check current working directory
-            var currentDirDeno = Path.Combine(Directory.GetCurrentDirectory(), "deno.exe");
-            if (File.Exists(currentDirDeno))
+            else
             {
-                _logger.LogInformation("Found Deno in current directory: {Path}", currentDirDeno);
-                return currentDirDeno;
+                // Standard URL format: https://www.youtube.com/watch?v=VIDEO_ID
+                var queryString = uri.Query;
+                if (queryString.StartsWith("?"))
+                {
+                    var pairs = queryString.Substring(1).Split('&');
+                    foreach (var pair in pairs)
+                    {
+                        var keyValue = pair.Split('=');
+                        if (keyValue.Length == 2 && keyValue[0] == "v")
+                        {
+                            return keyValue[1];
+                        }
+                    }
+                }
             }
-
-            // Check common Deno installation paths
-            var possiblePaths = new[]
+            
+            return $"video_{DateTime.Now:yyyyMMddHHmmss}";
+        }
+        catch
+        {
+            return $"video_{DateTime.Now:yyyyMMddHHmmss}";
+        }
+    }
+    
+    private string GetJSRuntimePath()
+    {
+        try
+        {
+            // Check for executables in project directory
+            var projectDir = AppContext.BaseDirectory;
+            var possibleRuntimes = new[]
             {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".deno", "bin", "deno.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "deno", "deno.exe"),
-                @"C:\Program Files\deno\deno.exe",
-                @"C:\Program Files (x86)\deno\deno.exe"
+                Path.Combine(projectDir, "deno.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "deno.exe")
             };
 
-            foreach (var path in possiblePaths)
+            foreach (var runtime in possibleRuntimes)
             {
-                if (File.Exists(path))
+                if (File.Exists(runtime))
                 {
-                    _logger.LogInformation("Found Deno at: {Path}", path);
-                    return path;
+                    _logger.LogInformation("Found JS runtime: {Runtime}", runtime);
+                    return $"deno:{runtime}";
                 }
             }
 
-            // Try to find deno in PATH
+            // Try system PATH
             var pathEnv = Environment.GetEnvironmentVariable("PATH");
             if (!string.IsNullOrEmpty(pathEnv))
             {
                 var pathDirs = pathEnv.Split(';');
                 foreach (var dir in pathDirs)
                 {
-                    var denoExe = Path.Combine(dir.Trim(), "deno.exe");
-                    if (File.Exists(denoExe))
+                    var denoPath = Path.Combine(dir.Trim(), "deno.exe");
+                    if (File.Exists(denoPath))
                     {
-                        _logger.LogInformation("Found Deno in PATH: {Path}", denoExe);
-                        return denoExe;
+                        _logger.LogInformation("Found Deno in PATH: {Path}", denoPath);
+                        return $"deno:{denoPath}";
+                    }
+                    
+                    var nodePath = Path.Combine(dir.Trim(), "node.exe");
+                    if (File.Exists(nodePath))
+                    {
+                        _logger.LogInformation("Found Node.js in PATH: {Path}", nodePath);
+                        return $"node:{nodePath}";
                     }
                 }
             }
 
-            _logger.LogWarning("Deno executable not found. YouTube downloads may fail.");
+            _logger.LogWarning("No JS runtime found. Downloads may fail for some videos.");
             return string.Empty;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error finding Deno path");
+            _logger.LogError(ex, "Error finding JS runtime");
             return string.Empty;
         }
     }
 
+    /// <summary>
+    /// Cleanup old video files to prevent disk space issues
+    /// </summary>
+    public void CleanupOldVideos(int maxAgeMinutes = 60)
+    {
+        try
+        {
+            var files = Directory.GetFiles(_tempFolder, "*.mp4")
+                .Where(f => File.GetCreationTime(f) < DateTime.Now.AddMinutes(-maxAgeMinutes))
+                .ToList();
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    File.Delete(file);
+                    _logger.LogInformation("Cleaned up old video: {File}", Path.GetFileName(file));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete old video: {File}", Path.GetFileName(file));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during video cleanup");
+        }
+    }
 }

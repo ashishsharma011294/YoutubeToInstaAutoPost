@@ -48,12 +48,11 @@ public class ReelsController : ControllerBase
                 _logger.LogInformation("No URL provided, fetched top trending YouTube video: {Url}", videoUrlToDownload);
             }
 
-            // Step 1: Download video
-            var videoPath = await _downloadService.DownloadAndUploadToDropboxAsync(videoUrlToDownload);
-            var fileName = Path.GetFileName(videoPath);
-            var videoUrl = $"/temp/{fileName}";
+            // Step 1: Download and process video for Instagram
+            var videoUrl = await _downloadService.DownloadAndProcessForInstagramAsync(videoUrlToDownload);
+            var fileName = Path.GetFileName(videoUrl.Split('/').Last());
 
-            _logger.LogInformation("Video downloaded, serving from: {Url}", videoUrl);
+            _logger.LogInformation("Video processed and ready: {FileName}", fileName);
 
             // Step 2: Post to Instagram
             var reelId = await _instagramService.PostReelAsync(videoUrl, request.Caption);
